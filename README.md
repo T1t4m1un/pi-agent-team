@@ -5,8 +5,8 @@
 ## 工作原理
 
 1. **定义团队** — 在 `team.yaml` 中声明 Lead + Workers，各配角色/模型/系统提示/工具
-2. **启动任务** — 在 Pi 中执行 `/team "你的需求"`，扩展自动启动 Lead，Lead 分解任务并分配给 Worker
-3. **崩溃恢复** — `/team-recover` 通过 JSONL 日志回放 + 状态快照恢复中断的会话
+2. **启动任务** — 在 Pi 中执行 `/team <team-name> "你的需求"`，扩展自动启动 Lead，Lead 分解任务并分配给 Worker
+3. **崩溃恢复** — 再次执行 `/team <team-name>` 即可自动恢复：框架检测到未完成的会话后，通过 JSONL 日志回放 + 状态快照恢复，并自动续跑中断的任务
 
 ## 架构
 
@@ -15,6 +15,7 @@
 - **ToolScheduler** — 按工具类型维护 FIFO 队列，检测文件冲突（同文件写串行化、读写互斥）
 - **LLMScheduler** — 按模型控制并发、429 自动重试（指数退避 + 抖动 + Retry-After）、Token 用量追踪
 - **JSONL Inbox** — 持久化消息日志，用于崩溃恢复
+- **SessionManifest** — 会话清单（`session.json`），跟踪会话状态（active/completed），启动时自动检测未完成的会话并触发恢复
 
 ## 快速开始
 
@@ -73,21 +74,20 @@ settings:
 在 Pi 中：
 
 ```
-/team 添加 JWT 用户认证功能
+/team dev-team 添加 JWT 用户认证功能
 ```
 
-崩溃恢复：
+崩溃恢复 — 如果上次会话中断，再次执行同一命令即可自动恢复：
 
 ```
-/team-recover
+/team dev-team
 ```
 
 ## 命令
 
 | 命令 | 说明 |
 |------|------|
-| `/team <消息>` | 启动团队会话，处理给定任务 |
-| `/team-recover` | 从上一次崩溃的团队会话中恢复 |
+| `/team <team-name> [任务]` | 启动或恢复团队会话；若存在未完成的会话则自动恢复 |
 
 ## 配置
 
@@ -148,9 +148,9 @@ src/
 ├── config/         # YAML 解析、工作流提取、系统提示构建
 ├── tools/          # Lead/Worker 工具定义（TypeBox Schema）
 ├── orchestration/  # Orchestrator 编排器
-├── recovery/       # 快照管理、JSONL 回放
+├── recovery/       # 快照管理、会话清单、JSONL 回放
 ├── tui/            # TUI 事件桥接
-└── index.ts        # 扩展入口，注册 /team 和 /team-recover 命令
+└── index.ts        # 扩展入口，注册 /team 命令（含自动恢复）
 ```
 
 ## 许可证
