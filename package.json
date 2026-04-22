@@ -1,0 +1,52 @@
+{
+  "name": "pi-agent-team",
+  "version": "0.1.0",
+  "description": "Multi-agent team framework for Pi Coding Agent",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src tests",
+    "lint:fix": "eslint src tests --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run tests/unit tests/integration",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:smoke": "PI_SMOKE_TEST=true vitest run tests/smoke",
+    "test:coverage": "vitest run tests/unit tests/integration --coverage",
+    "check": "tsc --noEmit && pnpm lint && pnpm format:check && pnpm test"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "team",
+    "multi-agent"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.68.0",
+    "@mariozechner/pi-ai": "^0.68.0",
+    "@mariozechner/pi-coding-agent": "^0.68.0",
+    "@sinclair/typebox": "^0.34.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import-x": "^4.16.2",
+    "prettier": "^3.8.3",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.59.0",
+    "vitest": "^3.0.0"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

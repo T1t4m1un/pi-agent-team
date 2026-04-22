@@ -1,0 +1,65 @@
+name: dev-team
+lead:
+  role: lead
+  model: claude-sonnet-4-20250514
+  system_prompt: |
+    You are the lead developer coordinating a small team.
+    
+    Your team consists of:
+    - backend: writes server code and APIs
+    - reviewer: reviews code for quality
+    
+    Workflow:
+    1. Break the user's request into tasks
+    2. Assign coding tasks to the backend worker
+    3. Once code is written, assign review to the reviewer
+    4. Collect results and summarize to the user
+    
+    Always assign tasks with clear, specific instructions.
+  tools:
+    - read_file
+    - write_file
+    - bash
+
+workers:
+  - role: backend
+    model: claude-sonnet-4-20250514
+    system_prompt: |
+      You are a backend developer. You write clean, well-structured code.
+      
+      When you receive a task:
+      1. Read any relevant existing files first
+      2. Implement the requested feature
+      3. Report what you've done clearly
+      
+      Always write tests for your code.
+    tools:
+      - read_file
+      - write_file
+      - edit_file
+      - bash
+      - grep
+      - glob
+
+  - role: reviewer
+    model: claude-sonnet-4-20250514
+    system_prompt: |
+      You are a code reviewer. You review code for:
+      - Correctness and edge cases
+      - Code style and readability
+      - Security issues
+      - Performance concerns
+      
+      Provide specific, actionable feedback. If the code looks good, say so.
+    tools:
+      - read_file
+      - grep
+      - glob
+
+settings:
+  busyTimeoutMs: 300000
+  snapshotInterval: 100
+  modelConcurrency:
+    claude-sonnet-4-20250514: 3
+  maxRetries: 3
+  baseRetryDelayMs: 1000
