@@ -65,15 +65,100 @@ import { MINIMAL_YAML } from "@test/fixtures/index.js";
 - `src/scheduler/` — LLM 并发控制 + 工具调度（文件冲突检测）
 - `src/types.ts` — 所有类型定义，`DEFAULT_SETTINGS` 在此
 
-## 测试注意事项
+## 测试规范
 
-- 测试框架：vitest
-- 测试中用真实临时目录（`mkdtemp`），不用 mock fs
-- mock 工厂在 `tests/helpers/mocks.ts`
-- fixture 在 `tests/fixtures/`（`messages.ts`、`team-configs.ts`）
-- 集成/单元测试中涉及 `.pi/teams/` 的，afterEach 要清理避免污染
-- smoke 测试默认跳过，需设 `PI_SMOKE_TEST=true`
-- vitest 默认排除 `tests/smoke/`，超时 30s
+### 层次化测试
+
+项目采用四层测试金字塔，每层有明确的职责边界和运行策略：
+
+| 层次 | 目录 | 职责 | 运行命令 | CI |
+|------|------|------|----------|----|
+| 单元测试 | `tests/unit/` | 单个模块/函数的输入输出正确性，mock 外部依赖 | `pnpm run test:unit` | 每次 |
+| 集成测试 | `tests/integration/` | 模块间协作正确性（config→tools、eventbus→inbox、recovery flow），可用真实 fs | `pnpm run test:integration` | 每次 |
+| 冒烟测试 | `tests/smoke/` | 端到端核心路径（bootstrap、extension 注册），需真实 Pi 环境 | `PI_SMOKE_TEST=true pnpm run test:smoke` | 手动 / 发版前 |
+| 线上回归 | — | 部署后验证生产环境健康度（canary check） | `npx gstack canary` 或 `/canary` | 部署后 |
+
+```bash
+pnpm test                # 单元 + 集成（CI 默认）
+pnpm run test:unit       # 仅单元
+pnpm run test:integration  # 仅集成
+pnpm run test:coverage   # 带 coverage 报告
+```
+
+### 单元测试
+
+- **目标**：验证单个函数/类的逻辑正确性
+- **规则**：
+  - mock 所有外部依赖（Agent、LLM 调用、fs 网络）
+  - 不依赖执行顺序，每个 test case 独立
+  - 测试文件与源文件目录结构镜像（`src/config/parser.ts` → `tests/unit/config/parser.test.ts`）
+  - mock 工厂在 `tests/helpers/mocks.ts`，fixture 在 `tests/fixtures/`
+- **覆盖范围**：
+  - `config/` — parser 解析、generator 生成、workflow 提取
+  - `actor/` — 状态机转换、非法转换报错
+  - `messaging/` — EventBus 路由、Message 校验、JsonlInbox 读写
+  - `scheduler/` — LLM 并发控制、ToolScheduler 队列与冲突检测
+  - `recovery/` — session-manifest CRUD、snapshot 保存加载
+  - `orchestration/` — orchestrator 方法逻辑（用 mock actors）
+  - `tools/` — tool 元数据、tool 执行逻辑
+
+### 集成测试
+
+- **目标**：验证模块间协作正确性
+- **规则**：
+  - 可使用真实临时目录（`mkdtemp`），不用 mock fs
+  - afterEach 清理 `.pi/teams/` 避免跨测试污染
+  - 测试跨模块的数据流（config → tools → messages）
+- **覆盖范围**：
+  - config 解析 → lead tools 创建（tool 名称、worker 列表）
+  - EventBus + JsonlInbox 消息持久化与回放
+  - recovery flow：bootstrap → snapshot → recover → 验证状态恢复
+  - team-init tool 端到端文件生成
+
+### 冒烟测试
+
+- **目标**：验证核心端到端路径在真实环境中可用
+- **规则**：
+  - 默认跳过（`describe.skipIf(!SMOKE_ENABLED)`），需 `PI_SMOKE_TEST=true`
+  - vitest 配置默认排除 `tests/smoke/`，超时 30s
+  - 需要真实 Pi Agent 运行环境
+- **覆盖范围**：
+  - `/team` 命令完整 bootstrap 流程
+  - extension 注册验证（命令、tool 均可用）
+
+### 线上回归
+
+- **目标**：部署后验证生产环境没有回归
+- **方式**：通过 `/canary` 或 `npx gstack canary` 执行部署后监控
+- **关注点**：
+  - console 错误、页面加载失败、性能回归
+  - 与部署前 baseline 对比
+  - 周期性截图 + 自动告警
+
+### 提测方案
+
+每个功能/变更的 PR 必须同步给出以下内容：
+
+1. **实现方案** — 改了什么、为什么这样改（PR 描述或关联 design doc）
+2. **测试方案** — 新增/修改了哪些测试、覆盖了哪些场景、边界条件是什么
+3. **验收方案** — 如何验证功能正确（手动步骤或自动化测试命令）
+
+```markdown
+## 实现方案
+<!-- 架构变更说明 -->
+
+## 测试方案
+<!-- 新增/修改的测试文件和用例说明 -->
+
+## 验收方案
+<!-- 运行命令或手动验证步骤 -->
+```
+
+跑单个测试文件：
+
+```bash
+npx vitest run tests/unit/actor/state-machine.test.ts
+```
 
 ## TypeScript 配置
 
