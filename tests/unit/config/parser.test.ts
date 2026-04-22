@@ -4,7 +4,7 @@ import {
   MISSING_NAME_YAML,
   MISSING_WORKERS_YAML,
   MISSING_LEAD_YAML,
-} from "@test/fixtures/index.js";
+} from "@test/fixtures/team-configs.js";
 import { describe, it, expect } from "vitest";
 import { parseTeamConfig } from "@/config/parser.js";
 

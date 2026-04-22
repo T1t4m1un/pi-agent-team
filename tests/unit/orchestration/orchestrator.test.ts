@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Orchestrator } from "@/orchestration/orchestrator.js";
-import { MINIMAL_YAML } from "@test/fixtures/index.js";
+import { MINIMAL_YAML } from "@test/fixtures/team-configs.js";
 import type { SessionManifest } from "@/recovery/session-manifest.js";
 
 vi.mock("@mariozechner/pi-agent-core", () => {

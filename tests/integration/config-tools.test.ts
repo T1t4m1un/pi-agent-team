@@ -1,4 +1,4 @@
-import { createMockEventBus } from "@test/helpers/index.js";
+import { createMockEventBus } from "@test/helpers/mocks.js";
 import { describe, it, expect } from "vitest";
 import { parseTeamConfig } from "@/config/parser.js";
 import { buildLeadSystemPrompt } from "@/config/workflow.js";
