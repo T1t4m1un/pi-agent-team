@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc-alias",
     "dev": "tsc --watch",
     "lint": "eslint src tests",
     "lint:fix": "eslint src tests --fix",
@@ -40,6 +40,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import-x": "^4.16.2",
     "prettier": "^3.8.3",
+    "tsc-alias": "^1.8.16",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.59.0",
     "vitest": "^3.0.0"
