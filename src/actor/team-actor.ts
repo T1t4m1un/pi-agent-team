@@ -1,4 +1,4 @@
-import { Agent, type AgentTool } from "@mariozechner/pi-agent-core";
+import { Agent, type AgentTool, type AgentMessage } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { ActorStateMachine } from "@/actor/state-machine.js";
 import type { EventBus } from "@/messaging/event-bus.js";
@@ -25,6 +25,7 @@ export class TeamActor {
   private unsubscribe?: () => void;
   private currentTaskId?: string;
   private lastActivity: number;
+  private pendingTask?: TaskPayload;
 
   constructor(
     actorId: string,
@@ -33,7 +34,7 @@ export class TeamActor {
     systemPrompt: string,
     tools: AgentTool<any>[],
     deps: TeamActorDeps,
-    agentOptions?: Record<string, unknown>,
+    options?: { initialMessages?: AgentMessage[]; agentOptions?: Record<string, unknown> },
   ) {
     this.actorId = actorId;
     this.role = role;
@@ -43,12 +44,18 @@ export class TeamActor {
     this.stateMachine = new ActorStateMachine("created");
     this.inbox = new JsonlInbox(deps.teamName, actorId);
 
+    const initialState: Record<string, unknown> = {
+      systemPrompt,
+      model: undefined as any,
+      tools,
+    };
+
+    if (options?.initialMessages && options.initialMessages.length > 0) {
+      initialState.messages = options.initialMessages;
+    }
+
     this.agent = new Agent({
-      initialState: {
-        systemPrompt,
-        model: undefined as any,
-        tools,
-      },
+      initialState: initialState as any,
       streamFn: (model, context, options) => {
         if (deps.llmScheduler) {
           const acquire = deps.llmScheduler.acquire(actorId, model.id);
@@ -60,7 +67,7 @@ export class TeamActor {
         }
         return streamSimple(model, context, options);
       },
-      ...agentOptions,
+      ...(options?.agentOptions ?? {}),
     });
   }
 
@@ -79,6 +86,10 @@ export class TeamActor {
     return this.stateMachine.isShutdown();
   }
 
+  get hasPendingTask(): boolean {
+    return this.pendingTask !== undefined;
+  }
+
   async init(): Promise<void> {
     this.stateMachine.transition("ready");
 
@@ -93,6 +104,58 @@ export class TeamActor {
       role: this.role,
     });
     await this.inbox.append({ direction: "out", message: initMsg });
+  }
+
+  setPendingTask(payload: TaskPayload): void {
+    this.pendingTask = payload;
+  }
+
+  async resumeTask(): Promise<void> {
+    if (!this.pendingTask) return;
+    if (!this.stateMachine.isReady()) return;
+
+    const task = this.pendingTask;
+    this.pendingTask = undefined;
+
+    this.stateMachine.transition("busy");
+    this.currentTaskId = `resume-${Date.now()}`;
+
+    try {
+      await this.agent.prompt(task.task);
+
+      const resultMsg = createMessage(
+        this.actorId,
+        this.deps.leadActorId,
+        "task_result",
+        {
+          status: "success",
+          result: "Resumed task completed",
+          actorId: this.actorId,
+        } as TaskResultPayload,
+      );
+      this.deps.eventBus.publish(resultMsg);
+      await this.inbox.append({ direction: "out", message: resultMsg });
+
+      this.stateMachine.transition("ready");
+    } catch (err) {
+      this.stateMachine.transition("error");
+
+      const errMsg = createMessage(
+        this.actorId,
+        this.deps.leadActorId,
+        "task_result",
+        {
+          status: "error",
+          error: String(err),
+          actorId: this.actorId,
+        } as TaskResultPayload,
+      );
+      this.deps.eventBus.publish(errMsg);
+      await this.inbox.append({ direction: "out", message: errMsg });
+    } finally {
+      this.currentTaskId = undefined;
+      this.lastActivity = Date.now();
+    }
   }
 
   private async handleMessage(msg: TeamMessage): Promise<void> {
@@ -213,5 +276,9 @@ export class TeamActor {
 
   getAgent(): Agent {
     return this.agent;
+  }
+
+  getMessages(): AgentMessage[] {
+    return this.agent.state.messages;
   }
 }

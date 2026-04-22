@@ -4,7 +4,8 @@ import { parseTeamConfig } from "@/config/parser.js";
 import { buildLeadSystemPrompt } from "@/config/workflow.js";
 import { EventBus } from "@/messaging/event-bus.js";
 import { createMessage } from "@/messaging/message.js";
-import { SnapshotManager } from "@/recovery/snapshot.js";
+import { SessionManifestManager, type SessionManifest } from "@/recovery/session-manifest.js";
+import { SnapshotManager, replayJsonlInboxes, type PendingTask } from "@/recovery/snapshot.js";
 import { LLMScheduler } from "@/scheduler/llm-scheduler.js";
 import { ToolScheduler } from "@/scheduler/tool-scheduler.js";
 import { createLeadTools, createWorkerMessageLeadTool } from "@/tools/team-tools.js";
@@ -15,7 +16,7 @@ import type {
   CollectResultsArgs,
   MessageLeadArgs,
 } from "@/tools/team-tools.js";
-import type { TeamConfig, ActorState, TeamMessage, SessionCostSummary } from "@/types.js";
+import type { TeamConfig, ActorState, TeamMessage, SessionCostSummary, StateSnapshot } from "@/types.js";
 import { DEFAULT_SETTINGS } from "@/types.js";
 
 export interface OrchestratorEvents {
@@ -27,6 +28,7 @@ export interface OrchestratorEvents {
 
 export class Orchestrator {
   private config!: TeamConfig;
+  private configPath!: string;
   private eventBus!: EventBus;
   private toolScheduler!: ToolScheduler;
   private llmScheduler!: LLMScheduler;
@@ -37,6 +39,7 @@ export class Orchestrator {
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private messageCountSinceSnapshot = 0;
   private snapshotManager!: SnapshotManager;
+  private manifestManager!: SessionManifestManager;
   private events: OrchestratorEvents;
   private teamName!: string;
   private shuttingDown = false;
@@ -55,6 +58,7 @@ export class Orchestrator {
     const content = readFileSync(yamlPath, "utf-8");
     this.config = parseTeamConfig(content);
     this.teamName = this.config.name;
+    this.configPath = yamlPath;
 
     const settings = { ...DEFAULT_SETTINGS, ...this.config.settings };
 
@@ -66,17 +70,9 @@ export class Orchestrator {
       baseRetryDelayMs: settings.baseRetryDelayMs,
     });
     this.snapshotManager = new SnapshotManager(this.teamName);
+    this.manifestManager = new SessionManifestManager(this.teamName);
 
-    this.eventBus.subscribe("__orchestrator__", (msg) => {
-      this.events.onActorMessage(msg);
-      this.messageCountSinceSnapshot++;
-
-      if (msg.type === "task_result") {
-        const payload = msg.payload as { status: string };
-        if (payload.status === "success") this.taskStats.completed++;
-        else if (payload.status === "error") this.taskStats.failed++;
-      }
-    });
+    this.setupOrchestratorSubscription();
 
     const workerRoles = this.config.workers.map((w) => w.role);
     const leadId = this.config.lead.role;
@@ -94,6 +90,13 @@ export class Orchestrator {
       this.workers.set(workerConfig.role, worker);
     }
 
+    await this.manifestManager.save({
+      configPath: yamlPath,
+      teamName: this.teamName,
+      status: "active",
+      startedAt: new Date().toISOString(),
+    });
+
     this.events.onTeamStart({
       teamName: this.teamName,
       actors: [leadId, ...workerRoles],
@@ -107,10 +110,112 @@ export class Orchestrator {
     this.startSnapshotTimer(settings.snapshotInterval);
   }
 
+  private setupOrchestratorSubscription(): void {
+    this.eventBus.subscribe("__orchestrator__", (msg) => {
+      this.events.onActorMessage(msg);
+      this.messageCountSinceSnapshot++;
+
+      if (msg.type === "task_result") {
+        const payload = msg.payload as { status: string };
+        if (payload.status === "success") this.taskStats.completed++;
+        else if (payload.status === "error") this.taskStats.failed++;
+      }
+    });
+  }
+
+  async recover(teamName: string): Promise<{ pendingTasks: PendingTask[]; recoveredFrom: string }> {
+    this.manifestManager = new SessionManifestManager(teamName);
+
+    const manifest = await this.manifestManager.load();
+    if (!manifest) {
+      throw new Error(`No session manifest found for team '${teamName}'`);
+    }
+    if (manifest.status === "completed") {
+      throw new Error(`Session for team '${teamName}' already completed`);
+    }
+
+    this.configPath = manifest.configPath;
+    const content = readFileSync(manifest.configPath, "utf-8");
+    this.config = parseTeamConfig(content);
+    this.teamName = this.config.name;
+
+    const settings = { ...DEFAULT_SETTINGS, ...this.config.settings };
+
+    this.eventBus = new EventBus();
+    this.toolScheduler = new ToolScheduler();
+    this.llmScheduler = new LLMScheduler({
+      modelConcurrency: settings.modelConcurrency,
+      maxRetries: settings.maxRetries,
+      baseRetryDelayMs: settings.baseRetryDelayMs,
+    });
+    this.snapshotManager = new SnapshotManager(this.teamName);
+
+    this.setupOrchestratorSubscription();
+
+    const workerRoles = this.config.workers.map((w) => w.role);
+    const leadId = this.config.lead.role;
+
+    const snapshot = await this.snapshotManager.loadLatest();
+    const leadTranscript = snapshot?.leadTranscript ?? [];
+
+    const leadSystemPrompt = buildLeadSystemPrompt(
+      this.getSystemPrompt(this.config.lead),
+      this.config,
+      workerRoles,
+    );
+
+    this.leadActor = await this.createLeadActor(leadId, leadSystemPrompt, workerRoles, leadTranscript);
+
+    for (const workerConfig of this.config.workers) {
+      const worker = await this.createWorkerActor(workerConfig, leadId);
+      this.workers.set(workerConfig.role, worker);
+    }
+
+    const allActorIds = [leadId, ...workerRoles];
+    const replayResult = await replayJsonlInboxes(this.teamName, allActorIds);
+
+    for (const pending of replayResult.pendingTasks) {
+      const actor = this.workers.get(pending.actorId);
+      if (actor && !actor.isShutdown) {
+        actor.setPendingTask(pending.taskPayload);
+      }
+    }
+
+    await this.manifestManager.updateStatus("active");
+
+    this.events.onTeamStart({
+      teamName: this.teamName,
+      actors: allActorIds,
+    });
+
+    await this.resumeWip();
+
+    this.startMonitor(settings.busyTimeoutMs);
+    this.startSnapshotTimer(settings.snapshotInterval);
+
+    return {
+      pendingTasks: replayResult.pendingTasks,
+      recoveredFrom: snapshot?.timestamp ?? manifest.lastSnapshotAt ?? manifest.startedAt,
+    };
+  }
+
+  private async resumeWip(): Promise<void> {
+    const resumePromises: Promise<void>[] = [];
+
+    for (const [, worker] of this.workers) {
+      if (worker.hasPendingTask) {
+        resumePromises.push(worker.resumeTask());
+      }
+    }
+
+    await Promise.allSettled(resumePromises);
+  }
+
   private async createLeadActor(
     leadId: string,
     systemPrompt: string,
     _workerRoles: string[],
+    initialMessages?: unknown[],
   ): Promise<TeamActor> {
     const deps = {
       eventBus: this.eventBus,
@@ -191,6 +296,9 @@ export class Orchestrator {
       systemPrompt,
       leadTools,
       deps,
+      initialMessages && initialMessages.length > 0
+        ? { initialMessages: initialMessages as any[] }
+        : undefined,
     );
     await actor.init();
     return actor;
@@ -282,9 +390,10 @@ export class Orchestrator {
       ...[...this.workers.values()].map((w) => w.state),
     ];
 
-    const snapshot = {
+    const snapshot: StateSnapshot = {
       timestamp: new Date().toISOString(),
       teamName: this.teamName,
+      configPath: this.configPath,
       actors,
       messageCount: this.eventBus.getMessageCount(),
       inFlightTasks: Object.fromEntries(
@@ -292,10 +401,21 @@ export class Orchestrator {
           .filter(([, w]) => w.state.currentState === "busy")
           .map(([id, w]) => [id, w.state.currentTask ?? "unknown"]),
       ),
+      leadTranscript: this.leadActor.getMessages(),
     };
 
-    await this.snapshotManager.save(snapshot as any);
+    await this.snapshotManager.save(snapshot);
     this.messageCountSinceSnapshot = 0;
+
+    if (this.manifestManager) {
+      await this.manifestManager.save({
+        configPath: this.configPath,
+        teamName: this.teamName,
+        status: "active",
+        startedAt: (await this.manifestManager.load())?.startedAt ?? new Date().toISOString(),
+        lastSnapshotAt: snapshot.timestamp,
+      });
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -306,6 +426,10 @@ export class Orchestrator {
     if (this.snapshotTimer) clearInterval(this.snapshotTimer);
 
     await this.takeSnapshot();
+
+    if (this.manifestManager) {
+      await this.manifestManager.updateStatus("completed");
+    }
 
     for (const worker of this.workers.values()) {
       await worker.shutdown();
@@ -336,5 +460,14 @@ export class Orchestrator {
 
   getTeamName(): string {
     return this.teamName;
+  }
+
+  getLeadActor(): TeamActor {
+    return this.leadActor;
+  }
+
+  async getManifest(): Promise<SessionManifest | null> {
+    if (!this.manifestManager) return null;
+    return this.manifestManager.load();
   }
 }

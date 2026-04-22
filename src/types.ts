@@ -146,7 +146,9 @@ export interface SessionCostSummary {
 export interface StateSnapshot {
   timestamp: string;
   teamName: string;
+  configPath: string;
   actors: ActorState[];
   messageCount: number;
   inFlightTasks: Record<string, string>;
+  leadTranscript: unknown[];
 }

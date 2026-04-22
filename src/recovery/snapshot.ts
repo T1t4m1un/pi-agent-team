@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { JsonlInbox, type JsonlEntry } from "@/messaging/jsonl-inbox.js";
-import type { StateSnapshot, ActorState } from "@/types.js";
+import type { StateSnapshot, ActorState, TaskPayload } from "@/types.js";
 
 export class SnapshotManager {
   private readonly snapshotsDir: string;
@@ -36,9 +36,16 @@ export class SnapshotManager {
   }
 }
 
+export interface PendingTask {
+  actorId: string;
+  taskPayload: TaskPayload;
+  messageId: string;
+}
+
 export interface ReplayResult {
   actorStates: Map<string, ActorState>;
   inFlightTasks: Record<string, string>;
+  pendingTasks: PendingTask[];
   lastMessageTimestamp: string;
   messageCount: number;
 }
@@ -50,6 +57,7 @@ export async function replayJsonlInboxes(
 ): Promise<ReplayResult> {
   const actorStates = new Map<string, ActorState>();
   const inFlightTasks = new Map<string, string>();
+  const pendingTasks: PendingTask[] = [];
   let lastMessageTimestamp = "";
   let messageCount = 0;
 
@@ -94,6 +102,11 @@ export async function replayJsonlInboxes(
         if (entry.direction === "in") {
           state.currentState = "busy";
           inFlightTasks.set(actorId, entry.message.id);
+          pendingTasks.push({
+            actorId,
+            taskPayload: entry.message.payload as TaskPayload,
+            messageId: entry.message.id,
+          });
         }
         break;
       case "task_result": {
@@ -101,9 +114,13 @@ export async function replayJsonlInboxes(
         if (payload.status === "success") {
           state.currentState = "ready";
           inFlightTasks.delete(actorId);
+          const taskIdx = pendingTasks.findIndex((t) => t.actorId === actorId);
+          if (taskIdx >= 0) pendingTasks.splice(taskIdx, 1);
         } else if (payload.status === "error") {
           state.currentState = "error";
           inFlightTasks.delete(actorId);
+          const taskIdx = pendingTasks.findIndex((t) => t.actorId === actorId);
+          if (taskIdx >= 0) pendingTasks.splice(taskIdx, 1);
         }
         break;
       }
@@ -116,6 +133,7 @@ export async function replayJsonlInboxes(
   return {
     actorStates,
     inFlightTasks: Object.fromEntries(inFlightTasks),
+    pendingTasks,
     lastMessageTimestamp,
     messageCount,
   };
