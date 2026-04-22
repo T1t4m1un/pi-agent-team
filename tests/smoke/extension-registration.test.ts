@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { Orchestrator } from "@/orchestration/orchestrator.js";
-import { SessionManifestManager } from "@/recovery/session-manifest.js";
 
 const SMOKE_ENABLED = process.env.PI_SMOKE_TEST === "true";
 

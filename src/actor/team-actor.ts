@@ -123,16 +123,11 @@ export class TeamActor {
     try {
       await this.agent.prompt(task.task);
 
-      const resultMsg = createMessage(
-        this.actorId,
-        this.deps.leadActorId,
-        "task_result",
-        {
-          status: "success",
-          result: "Resumed task completed",
-          actorId: this.actorId,
-        } as TaskResultPayload,
-      );
+      const resultMsg = createMessage(this.actorId, this.deps.leadActorId, "task_result", {
+        status: "success",
+        result: "Resumed task completed",
+        actorId: this.actorId,
+      } as TaskResultPayload);
       this.deps.eventBus.publish(resultMsg);
       await this.inbox.append({ direction: "out", message: resultMsg });
 
@@ -140,16 +135,11 @@ export class TeamActor {
     } catch (err) {
       this.stateMachine.transition("error");
 
-      const errMsg = createMessage(
-        this.actorId,
-        this.deps.leadActorId,
-        "task_result",
-        {
-          status: "error",
-          error: String(err),
-          actorId: this.actorId,
-        } as TaskResultPayload,
-      );
+      const errMsg = createMessage(this.actorId, this.deps.leadActorId, "task_result", {
+        status: "error",
+        error: String(err),
+        actorId: this.actorId,
+      } as TaskResultPayload);
       this.deps.eventBus.publish(errMsg);
       await this.inbox.append({ direction: "out", message: errMsg });
     } finally {

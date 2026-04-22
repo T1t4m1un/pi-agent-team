@@ -60,9 +60,7 @@ describe("Recovery integration", () => {
     const first = new Orchestrator({ onTeamStart: onStart, onTeamEnd: onEnd });
     await first.bootstrap(yamlPath, "do something");
 
-    expect(onStart).toHaveBeenCalledWith(
-      expect.objectContaining({ teamName: TEAM_NAME }),
-    );
+    expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ teamName: TEAM_NAME }));
 
     const manifestAfterBoot = await first.getManifest();
     expect(manifestAfterBoot?.status).toBe("active");
@@ -85,9 +83,7 @@ describe("Recovery integration", () => {
     const second = new Orchestrator({ onTeamStart: onStart2 });
     const result = await second.recover(TEAM_NAME);
 
-    expect(onStart2).toHaveBeenCalledWith(
-      expect.objectContaining({ teamName: TEAM_NAME }),
-    );
+    expect(onStart2).toHaveBeenCalledWith(expect.objectContaining({ teamName: TEAM_NAME }));
     expect(result.recoveredFrom).toBeDefined();
     expect(result.pendingTasks).toBeDefined();
     expect(Array.isArray(result.pendingTasks)).toBe(true);

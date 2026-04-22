@@ -16,7 +16,13 @@ import type {
   CollectResultsArgs,
   MessageLeadArgs,
 } from "@/tools/team-tools.js";
-import type { TeamConfig, ActorState, TeamMessage, SessionCostSummary, StateSnapshot } from "@/types.js";
+import type {
+  TeamConfig,
+  ActorState,
+  TeamMessage,
+  SessionCostSummary,
+  StateSnapshot,
+} from "@/types.js";
 import { DEFAULT_SETTINGS } from "@/types.js";
 
 export interface OrchestratorEvents {
@@ -164,7 +170,12 @@ export class Orchestrator {
       workerRoles,
     );
 
-    this.leadActor = await this.createLeadActor(leadId, leadSystemPrompt, workerRoles, leadTranscript);
+    this.leadActor = await this.createLeadActor(
+      leadId,
+      leadSystemPrompt,
+      workerRoles,
+      leadTranscript,
+    );
 
     for (const workerConfig of this.config.workers) {
       const worker = await this.createWorkerActor(workerConfig, leadId);

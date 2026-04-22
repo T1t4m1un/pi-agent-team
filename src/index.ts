@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Orchestrator } from "@/orchestration/orchestrator.js";
 import { SessionManifestManager } from "@/recovery/session-manifest.js";
+import { createTeamInitTool, INIT_SYSTEM_PROMPT } from "@/tools/team-init-tools.js";
 import type { SessionCostSummary } from "@/types.js";
 
 export { ActorStateMachine } from "@/actor/state-machine.js";
@@ -18,6 +19,8 @@ export { parseTeamConfig } from "@/config/parser.js";
 export { SnapshotManager, replayJsonlInboxes } from "@/recovery/snapshot.js";
 export { SessionManifestManager } from "@/recovery/session-manifest.js";
 export { createLeadTools, createWorkerMessageLeadTool } from "@/tools/team-tools.js";
+export { createTeamInitTool } from "@/tools/team-init-tools.js";
+export { generateTeamYaml, resolveConfigPath } from "@/config/generator.js";
 export { buildLeadSystemPrompt } from "@/config/workflow.js";
 export type * from "@/types.js";
 
@@ -42,19 +45,15 @@ async function findTeamYaml(teamName: string, cwd: string): Promise<string> {
   );
 }
 
-function createOrchestratorWithCallbacks(ctx: { ui: { notify: (msg: string, level?: "error" | "info" | "warning") => void } }): Orchestrator {
+function createOrchestratorWithCallbacks(ctx: {
+  ui: { notify: (msg: string, level?: "error" | "info" | "warning") => void };
+}): Orchestrator {
   return new Orchestrator({
     onTeamStart: (info) => {
-      ctx.ui.notify(
-        `Team '${info.teamName}' started with ${info.actors.length} actors`,
-        "info",
-      );
+      ctx.ui.notify(`Team '${info.teamName}' started with ${info.actors.length} actors`, "info");
     },
     onTeamEnd: (summary: SessionCostSummary) => {
-      ctx.ui.notify(
-        `Team session ended. ${summary.taskStats.completed} tasks completed.`,
-        "info",
-      );
+      ctx.ui.notify(`Team session ended. ${summary.taskStats.completed} tasks completed.`, "info");
       activeOrchestrator = null;
     },
     onActorStateChange: (info) => {
@@ -111,6 +110,17 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`Team error: ${String(err)}`, "error");
         activeOrchestrator = null;
       }
+    },
+  });
+
+  pi.registerCommand("team-init", {
+    description: "交互式生成团队配置文件 (usage: /team-init [团队描述])",
+    handler: async (args, ctx) => {
+      const tool = createTeamInitTool(ctx.cwd, ctx.ui.notify.bind(ctx.ui));
+      pi.registerTool(tool);
+
+      const userDescription = args.trim() || "帮我创建一个新的团队配置";
+      pi.sendUserMessage(`${INIT_SYSTEM_PROMPT}\n\n用户需求：${userDescription}`);
     },
   });
 }

@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MINIMAL_YAML } from "@test/fixtures/team-configs.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Orchestrator } from "@/orchestration/orchestrator.js";
-import { MINIMAL_YAML } from "@test/fixtures/team-configs.js";
 import type { SessionManifest } from "@/recovery/session-manifest.js";
 
 vi.mock("@mariozechner/pi-agent-core", () => {
